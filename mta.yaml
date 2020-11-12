@@ -13,6 +13,7 @@ modules:
    requires:
       - name: shadowuser-mgmt-job-uaa
       - name: general-jobscheduler
+      - name: general-apiaccess
    properties:
       SAP_JWT_TRUST_ACL: '[{"clientid":"*","identityzone":"*"}]'
 resources:
@@ -23,4 +24,6 @@ resources:
       service: xsuaa
       path: ./xs-security.json 
   - name: general-jobscheduler
+    type: org.cloudfoundry.existing-service
+  - name: general-apiaccess 
     type: org.cloudfoundry.existing-service

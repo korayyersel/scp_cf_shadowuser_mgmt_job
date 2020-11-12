@@ -1,0 +1,14 @@
+---
+applications:
+- name: shadowuser-mgmt-job-srv
+  type: javascript.nodejs
+  properties:
+    SAP_JWT_TRUST_ACL: '[{"clientid":"*","identityzone":"*"}]'
+  requires:
+  - name: shadowuser-mgmt-job-uaa
+  - name: general-jobscheduler
+  - name: general-apiaccess
+  provides:
+  - name: srv-api
+    properties:
+      url: ${default-url}
