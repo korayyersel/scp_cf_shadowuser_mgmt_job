@@ -8,9 +8,9 @@ var passport = require("passport");
 var xssec = require("@sap/xssec");
 var xsenv = require("@sap/xsenv");
 var schedulerLib = require("./lib/schedulerLib");
+const { response } = require("express");
 
 var app = express();
-var currentToken = null;//TODO test falscher wert
 
 passport.use("JWT", new xssec.JWTStrategy(xsenv.getServices({
 	uaa: {
@@ -73,12 +73,12 @@ function getToken() {
 				if (resultJSON && resultJSON.access_token) {
 					resolve(resultJSON.access_token);
 				} else {
-					reject();
+					reject("unexpected response");
 				}
 			});
 			res.on('error', function (err) {
 				console.log(err);
-				reject();
+				reject(err);
 			});
 		});
 		// req error
@@ -91,9 +91,9 @@ function getToken() {
 	});
 }
 
-function readUsers(){
-	return new Promise(function (resolve, reject) {
-		
+function readUsers(startIndex){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
 		var shadowUserAPIAccessConfiguration = xsenv.getServices({
 			configuration: {
 				name: "general-apiaccess"
@@ -101,12 +101,12 @@ function readUsers(){
 		});
 				
 		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
-		
+		var path = startIndex ? "/Users?startIndex=" + startIndex : "/Users";		
 		var options = {
 			host: host,
 			port: 443,
 			method: 'GET',
-			path: '/Users',
+			path: path,
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				'Authorization': 'Bearer ' + currentToken
@@ -118,15 +118,12 @@ function readUsers(){
 			res.on('data', function (chunk) {
 				result += chunk;
 			});
-			res.on('end', function () {
-				
+			res.on('end', function () {				
 				if(res.statusCode === 200){
-					var resultJSON = JSON.parse(result);
-					resolve(resultJSON.resources);
-				}  else if(res.statusCode === 401) {
-					// 401 token is not valid anymore
-					reject("401");
-				}
+					resolve(result);
+				} else {
+					reject(res.statusCode);
+				} 
 			});
 			res.on('error', function (err) {
 				console.log(err);
@@ -150,23 +147,30 @@ app.get("/readShadowUsers", function (req, res) {
 	};
 
 	var jobStartPromise = messageJobStart(res, "readShadowUsers");
-	jobStartPromise.then(async function () {
-		if(!currentToken){
-			currentToken = await getToken();
-		}	
-		var users = await readUsers();
-		// 401 token is not valid anymore
-		if(users === "401"){
-			// refresh token
-			currentToken = await getToken();
-			users = await readUsers();
-		}
-		if(users && users.length){
-			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " user found");
-		} else {
-			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: cannot read users");
-		}
-		
+	jobStartPromise.then(async function () {		
+		var users = null;
+		try{
+			var response = await readUsers();
+			var responseAsJSON = JSON.parse(response);
+			users = responseAsJSON.resources;
+			
+			if(responseAsJSON.totalResults > 100){
+				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
+					var response = await readUsers(startIndex);
+					var responseAsJSON = JSON.parse(response);
+					users = users.concat(responseAsJSON.resources);
+					startIndex += 100;
+				}				
+			}
+		} catch(error){
+			// do nothing, just go on
+		} finally {
+			if(users && users.length){
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " user found");
+			} else {
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: cannot read users");
+			}
+		}		
 	});
 });
 
