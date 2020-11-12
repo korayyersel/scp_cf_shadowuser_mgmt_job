@@ -134,6 +134,49 @@ function readUsers(startIndex){
 	});
 }
 
+function readGroups(startIndex){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
+		var shadowUserAPIAccessConfiguration = xsenv.getServices({
+			configuration: {
+				name: "general-apiaccess"
+			}
+		});
+				
+		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
+		var path = startIndex ? "/Groups?startIndex=" + startIndex : "/Groups";		
+		var options = {
+			host: host,
+			port: 443,
+			method: 'GET',
+			path: path,
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'Authorization': 'Bearer ' + currentToken
+			}
+		};
+		// request object
+		var req = https.request(options, function (res) {
+			var result = '';
+			res.on('data', function (chunk) {
+				result += chunk;
+			});
+			res.on('end', function () {				
+				if(res.statusCode === 200){
+					resolve(result);
+				} else {
+					reject(res.statusCode);
+				} 
+			});
+			res.on('error', function (err) {
+				console.log(err);
+				reject();
+			});
+		});
+		req.end();
+	});
+}
+
 app.get("/readShadowUsers", function (req, res) {
 	var jobID = req.get("x-sap-job-id");
 	var jobScheduleId = req.get("x-sap-job-schedule-id");
@@ -166,9 +209,49 @@ app.get("/readShadowUsers", function (req, res) {
 			// do nothing, just go on
 		} finally {
 			if(users && users.length){
-				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " user found");
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " users found");
 			} else {
 				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: cannot read users");
+			}
+		}		
+	});
+});
+
+app.get("/readGroups", function (req, res) {
+	var jobID = req.get("x-sap-job-id");
+	var jobScheduleId = req.get("x-sap-job-schedule-id");
+	var jobRunId = req.get("x-sap-job-run-id");
+
+	var schedulerUpdateRequest = {
+		jobId: jobID,
+		scheduleId: jobScheduleId,
+		runId: jobRunId,
+		data: ""
+	};
+
+	var jobStartPromise = messageJobStart(res, "readGroups");
+	jobStartPromise.then(async function () {		
+		var groups = null;
+		try{
+			var response = await readGroups();
+			var responseAsJSON = JSON.parse(response);
+			groups = responseAsJSON.resources;
+			
+			if(responseAsJSON.totalResults > 100){
+				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
+					var response = await readGroups(startIndex);
+					var responseAsJSON = JSON.parse(response);
+					groups = groups.concat(responseAsJSON.resources);
+					startIndex += 100;
+				}				
+			}
+		} catch(error){
+			// do nothing, just go on
+		} finally {
+			if(groups && groups.length){
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groups.length + " groups found");
+			} else {
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: cannot read groups");
 			}
 		}		
 	});
