@@ -120,7 +120,7 @@ function readUsers(startIndex){
 			});
 			res.on('end', function () {				
 				if(res.statusCode === 200){
-					resolve(result);
+					resolve(JSON.parse(result));
 				} else {
 					reject(res.statusCode);
 				} 
@@ -163,7 +163,7 @@ function readGroups(startIndex){
 			});
 			res.on('end', function () {				
 				if(res.statusCode === 200){
-					resolve(result);
+					resolve(JSON.parse(result));
 				} else {
 					reject(res.statusCode);
 				} 
@@ -173,6 +173,59 @@ function readGroups(startIndex){
 				reject();
 			});
 		});
+		req.end();
+	});
+}
+
+function clearGroup(id, ifmatch){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
+		var shadowUserAPIAccessConfiguration = xsenv.getServices({
+			configuration: {
+				name: "general-apiaccess"
+			}
+		});
+				
+		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
+		var path = "/Groups/" + id;	
+		
+		var data = JSON.stringify({
+			"id": id,
+			"members": []
+		});
+
+		var options = {
+			host: host,
+			port: 443,
+			method: 'PUT',
+			path: path,
+			headers: {
+				'Content-Type': 'application/scim+json',
+				'Authorization': 'Bearer ' + currentToken,
+				'Content-Length': data.length,
+				'If-Match': ifmatch
+			}
+		};		
+
+		// request object
+		var req = https.request(options, function (res) {
+			var result = '';
+			res.on('data', function (chunk) {
+				result += chunk;
+			});
+			res.on('end', function () {				
+				if(res.statusCode === 200){
+					resolve(JSON.parse(result));
+				} else {
+					reject(res.statusCode);
+				} 
+			});
+			res.on('error', function (err) {
+				console.log(err);
+				reject();
+			});
+		});
+		req.write(data);
 		req.end();
 	});
 }
@@ -193,14 +246,12 @@ app.get("/readShadowUsers", function (req, res) {
 	jobStartPromise.then(async function () {		
 		var users = null;
 		try{
-			var response = await readUsers();
-			var responseAsJSON = JSON.parse(response);
+			var responseAsJSON = await readUsers();
 			users = responseAsJSON.resources;
 			
 			if(responseAsJSON.totalResults > 100){
 				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
-					var response = await readUsers(startIndex);
-					var responseAsJSON = JSON.parse(response);
+					var responseAsJSON = await readUsers(startIndex);
 					users = users.concat(responseAsJSON.resources);
 					startIndex += 100;
 				}				
@@ -233,14 +284,12 @@ app.get("/readGroups", function (req, res) {
 	jobStartPromise.then(async function () {		
 		var groups = null;
 		try{
-			var response = await readGroups();
-			var responseAsJSON = JSON.parse(response);
+			var responseAsJSON = await readGroups();
 			groups = responseAsJSON.resources;
 			
 			if(responseAsJSON.totalResults > 100){
 				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
-					var response = await readGroups(startIndex);
-					var responseAsJSON = JSON.parse(response);
+					var responseAsJSON = await readGroups(startIndex);
 					groups = groups.concat(responseAsJSON.resources);
 					startIndex += 100;
 				}				
@@ -252,6 +301,53 @@ app.get("/readGroups", function (req, res) {
 				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groups.length + " groups found");
 			} else {
 				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: cannot read groups");
+			}
+		}		
+	});
+});
+
+app.get("/clearGroups", function (req, res) {
+	var jobID = req.get("x-sap-job-id");
+	var jobScheduleId = req.get("x-sap-job-schedule-id");
+	var jobRunId = req.get("x-sap-job-run-id");
+
+	var schedulerUpdateRequest = {
+		jobId: jobID,
+		scheduleId: jobScheduleId,
+		runId: jobRunId,
+		data: ""
+	};
+
+	var jobStartPromise = messageJobStart(res, "readGroups");
+	jobStartPromise.then(async function () {		
+		var groups = null;
+		var message = "";
+		try{
+			var responseAsJSON = await readGroups();
+			groups = responseAsJSON.resources;
+			
+			if(responseAsJSON.totalResults > 100){
+				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
+					var responseAsJSON = await readGroups(startIndex);
+					groups = groups.concat(responseAsJSON.resources);
+					startIndex += 100;
+				}				
+			}
+			
+			for(var i = 0; i < groups.length; i++){
+				var group = groups[i];
+				var responseAsJSON = await clearGroup(group.id, group.meta.version);
+				message += (message === "") ? responseAsJSON.id : (", " + responseAsJSON.id);
+
+			}
+
+		} catch(error){
+			// do nothing, just go on
+		} finally {
+			if(groups && groups.length){
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: Following groups are cleared " + message);
+			} else {
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with error: error while clearing groups");
 			}
 		}		
 	});
