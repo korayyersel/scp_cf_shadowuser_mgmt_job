@@ -1,0 +1,26 @@
+ID: shadowuser-mgmt-job
+_schema-version: '2.1'
+version: 0.0.1
+
+modules:
+ - name: shadowuser-mgmt-job-srv
+   type: nodejs
+   path: srv
+   provides:
+    - name: srv-api
+      properties:
+         url: ${default-url}
+   requires:
+      - name: shadowuser-mgmt-job-uaa
+      - name: general-jobscheduler
+   properties:
+      SAP_JWT_TRUST_ACL: '[{"clientid":"*","identityzone":"*"}]'
+resources:
+  - name: shadowuser-mgmt-job-uaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service-plan: application
+      service: xsuaa
+      path: ./xs-security.json 
+  - name: general-jobscheduler
+    type: org.cloudfoundry.existing-service

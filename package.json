@@ -1,0 +1,22 @@
+{
+    "name": "cloudfoundry_job_demo",
+    "version": "1.0.0",    
+    "license": "ISC",
+    "dependencies": {
+		"express": "^4.17.1",
+		"@sap/hana-client": "2.4.171",
+		"@sap/xsenv": "^1.2.9",
+		"passport": "^0.3.2",
+		"@sap/xssec": "2.1.6",
+		"jsonwebtoken": "8.3.0"
+    },
+    "engines": {
+        "node": "10.x"
+    },
+    "scripts": {
+        "build": "cds build/all --clean",
+        "build:mta": "cds build/all && mbt build -p=cf",
+        "deploy": "cds deploy",
+        "start": "cds run"
+    }
+}
