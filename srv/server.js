@@ -496,10 +496,12 @@ app.get("/assignGroupMembers", function (req, res) {
 					startIndex += 100;
 				}				
 			}
+
+			var assigmentInfo = "";
+
 			// loop thru groups
 			for(var i = 0; i < groupsToBeAssigned.length; i++){
 				var groupToBeAssigned = groupsToBeAssigned[i];
-				console.log("----------------------0 " + groupsToBeAssigned[i]);
 				var usersToBeAssigned = [];
 				// make a list of users who does not have the membership
 				for(var j = 0; j < users.length; j++){
@@ -517,15 +519,14 @@ app.get("/assignGroupMembers", function (req, res) {
 					}
 				}
 				// take only 100 users first. for the rest wait for the next scheduled call
-				console.log("----------------------0 " + usersToBeAssigned.length);
 				usersToBeAssigned = usersToBeAssigned.slice(0, 100);
-				console.log("----------------------0 " + usersToBeAssigned.length);
 				var response = await assignMembersToGroup(groupToBeAssigned, usersToBeAssigned);
+				assigmentInfo += usersToBeAssigned.length + " users added to " + groupToBeAssigned + ". ";
 			}				
 		} catch(error){
 			// do nothing, just go on
 		} finally {
-			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groupsToBeAssigned.length + " groups processed.");
+			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groupsToBeAssigned.length + " groups processed. " + assigmentInfo);
 			/*
 			if(groupsToBeAssigned && groupsToBeAssigned.length > 0){
 				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " users found");				
