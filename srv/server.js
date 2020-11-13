@@ -335,6 +335,70 @@ function assignMembersToGroup(groupId, usersToBeAssigned){
 	});
 }
 
+function createUser(email, origin, zoneId){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
+		var shadowUserAPIAccessConfiguration = xsenv.getServices({
+			configuration: {
+				name: "general-apiaccess"
+			}
+		});
+				
+		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
+		var path = "/Users";	
+		var postBody = {
+			"userName": email,
+			"externalId": email,
+			"emails": [
+				{
+				"value": email,
+				"primary": false
+				}
+			],      
+			"approvals": [],
+			"active": true,
+			"verified": true,
+			"origin": origin,
+			"zoneId": zoneId			
+		};
+
+		var data = JSON.stringify(postBody);
+
+		var options = {
+			host: host,
+			port: 443,
+			method: 'POST',
+			path: path,
+			headers: {
+				'Content-Type': 'application/scim+json',
+				'Authorization': 'Bearer ' + currentToken,
+				'Content-Length': data.length
+			}
+		};		
+
+		// request object
+		var req = https.request(options, function (res) {
+			var result = '';
+			res.on('data', function (chunk) {
+				result += chunk;
+			});
+			res.on('end', function () {			
+				if(res.statusCode === 201){
+					resolve(JSON.parse(result));
+				} else {
+					reject(res.statusCode);
+				} 
+			});
+			res.on('error', function (err) {
+				console.log(err);
+				reject();
+			});
+		});
+		req.write(data);
+		req.end();
+	});
+}
+
 app.get("/readShadowUsers", function (req, res) {
 	var jobID = req.get("x-sap-job-id");
 	var jobScheduleId = req.get("x-sap-job-schedule-id");
@@ -529,9 +593,9 @@ app.get("/assignGroupMembers", function (req, res) {
 });
 
 app.post("/createUsers", function (req, res) {
-	console.dir("-------------------------------------------");
-	console.dir(req.body.users.length);
-	//var usersToBeCreated = req.query.users;
+	var usersToBeProcessed = req.body.users;
+	var origin = req.body.origin;
+	var zoneId = req.body.zoneId;
 
 	var jobID = req.get("x-sap-job-id");
 	var jobScheduleId = req.get("x-sap-job-schedule-id");
@@ -545,14 +609,65 @@ app.post("/createUsers", function (req, res) {
 	};
 
 	var jobStartPromise = messageJobStart(res, "createUsers");
-	jobStartPromise.then(async function () {
-		/*
-		if(!(usersToBeCreated && usersToBeCreated.length > 0)){
-			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no groups are provided");
+	jobStartPromise.then(async function () {	
+		if(!(usersToBeProcessed && usersToBeProcessed.length > 0)){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no users provided");
 			return;	
 		}
-		schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with success: " + usersToBeCreated.length + " users.");
-		*/
+		if(!origin){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no origin provided");
+			return;	
+		}
+		if(!zoneId){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no zoneId provided");
+			return;	
+		}
+		var existingUsers = null;
+		try{
+			// read all users
+			var responseAsJSON = await readUsers();
+			existingUsers = responseAsJSON.resources;
+			
+			if(responseAsJSON.totalResults > 100){
+				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
+					var responseAsJSON = await readUsers(startIndex);
+					existingUsers = existingUsers.concat(responseAsJSON.resources);
+					startIndex += 100;
+				}				
+			}
+
+			var existingUserEmail = [];
+			for(var i = 0; i < existingUsers.length; i++){
+				if(existingUsers[i].externalId){
+					var email = existingUsers[i].externalId.toString().toLowerCase();
+					existingUserEmail.push(email);
+				}				
+			}
+
+			var usersToBeCreated = [];
+			for(var j = 0; j < usersToBeProcessed.length; j++){
+				var email = usersToBeProcessed[j].toString().toLowerCase();
+				if(existingUserEmail.indexOf(email) < 0){
+					usersToBeCreated.push(email);
+				}
+			}
+
+			var assigmentInfo = "";
+			assigmentInfo += usersToBeCreated.length + " users are going to be created. (in this batch only 500 of them). ";
+			usersToBeCreated = usersToBeCreated.splice(0, 500);
+			for(var k = 0; k < usersToBeCreated.length; k++){
+				try{
+					await createUser(usersToBeCreated[k], origin, zoneId);
+				} catch(err){
+					assigmentInfo += "Error for user " + usersToBeCreated[k] + ". ";
+				}				
+			}						
+		} catch(error){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error");
+			return;
+		} finally {
+			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + usersToBeProcessed.length + " users processed. " + assigmentInfo);			
+		}			
 	});
 });
 
