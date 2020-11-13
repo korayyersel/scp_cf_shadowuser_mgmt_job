@@ -9,6 +9,7 @@ var xssec = require("@sap/xssec");
 var xsenv = require("@sap/xsenv");
 var schedulerLib = require("./lib/schedulerLib");
 const { response } = require("express");
+const { read } = require("fs");
 
 var app = express();
 
@@ -177,6 +178,49 @@ function readGroups(startIndex){
 	});
 }
 
+function readGroup(groupiId){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
+		var shadowUserAPIAccessConfiguration = xsenv.getServices({
+			configuration: {
+				name: "general-apiaccess"
+			}
+		});
+				
+		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
+		var path = "/Groups/" + groupiId;		
+		var options = {
+			host: host,
+			port: 443,
+			method: 'GET',
+			path: path,
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'Authorization': 'Bearer ' + currentToken
+			}
+		};
+		// request object
+		var req = https.request(options, function (res) {
+			var result = '';
+			res.on('data', function (chunk) {
+				result += chunk;
+			});
+			res.on('end', function () {				
+				if(res.statusCode === 200){
+					resolve(JSON.parse(result));
+				} else {
+					reject(res.statusCode);
+				} 
+			});
+			res.on('error', function (err) {
+				console.log(err);
+				reject();
+			});
+		});
+		req.end();
+	});
+}
+
 function clearGroup(id, ifmatch){
 	return new Promise(async function (resolve, reject) {
 		var currentToken = await getToken();	
@@ -214,6 +258,71 @@ function clearGroup(id, ifmatch){
 				result += chunk;
 			});
 			res.on('end', function () {				
+				if(res.statusCode === 200){
+					resolve(JSON.parse(result));
+				} else {
+					reject(res.statusCode);
+				} 
+			});
+			res.on('error', function (err) {
+				console.log(err);
+				reject();
+			});
+		});
+		req.write(data);
+		req.end();
+	});
+}
+
+function assignMembersToGroup(groupId, usersToBeAssigned){
+	return new Promise(async function (resolve, reject) {
+		var currentToken = await getToken();	
+		var shadowUserAPIAccessConfiguration = xsenv.getServices({
+			configuration: {
+				name: "general-apiaccess"
+			}
+		});
+				
+		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
+		var path = "/Groups/" + groupId;	
+		var postBody = {
+			"id": groupId,
+			"members": []
+		};
+
+		for(var i = 0; i < usersToBeAssigned.length; i++) {
+			var user = usersToBeAssigned[i];
+			postBody.members.push({
+				value: user.id,
+				origin: user.origin,
+				type: "USER"
+			});
+		}
+
+		var data = JSON.stringify(postBody);
+		
+		var group = await readGroup(groupId);
+
+		var options = {
+			host: host,
+			port: 443,
+			method: 'PATCH',
+			path: path,
+			headers: {
+				'Content-Type': 'application/scim+json',
+				'Authorization': 'Bearer ' + currentToken,
+				'Content-Length': data.length,
+				'If-Match': group.meta.version
+			}
+		};		
+
+		// request object
+		var req = https.request(options, function (res) {
+			var result = '';
+			res.on('data', function (chunk) {
+				result += chunk;
+			});
+			res.on('end', function () {			
 				if(res.statusCode === 200){
 					resolve(JSON.parse(result));
 				} else {
@@ -352,6 +461,82 @@ app.get("/clearGroups", function (req, res) {
 		}		
 	});
 });
+
+app.get("/assignGroupMembers", function (req, res) {
+	var groupsToBeAssigned = req.query.groups;
+
+	var jobID = req.get("x-sap-job-id");
+	var jobScheduleId = req.get("x-sap-job-schedule-id");
+	var jobRunId = req.get("x-sap-job-run-id");
+
+	var schedulerUpdateRequest = {
+		jobId: jobID,
+		scheduleId: jobScheduleId,
+		runId: jobRunId,
+		data: ""
+	};
+
+	var jobStartPromise = messageJobStart(res, "assignGroupMembers");
+	jobStartPromise.then(async function () {
+		if(!(groupsToBeAssigned && groupsToBeAssigned.length > 0)){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no groups are provided");
+			return;	
+		}
+
+		var users = null;
+		try{
+			// read all users
+			var responseAsJSON = await readUsers();
+			users = responseAsJSON.resources;
+			
+			if(responseAsJSON.totalResults > 100){
+				for (var startIndex = 101; startIndex <= responseAsJSON.totalResults;) {
+					var responseAsJSON = await readUsers(startIndex);
+					users = users.concat(responseAsJSON.resources);
+					startIndex += 100;
+				}				
+			}
+			// loop thru groups
+			for(var i = 0; i < groupsToBeAssigned.length; i++){
+				var groupToBeAssigned = groupsToBeAssigned[i];
+				console.log("----------------------0 " + groupsToBeAssigned[i]);
+				var usersToBeAssigned = [];
+				// make a list of users who does not have the membership
+				for(var j = 0; j < users.length; j++){
+					var user = users[j];
+					var found = false;
+					for(var k = 0; k < user.groups.length; k++){
+						var group = user.groups[k];
+						if(group.value === groupToBeAssigned){
+							found = true;
+							break;
+						}
+					}
+					if(!found){
+						usersToBeAssigned.push(user);
+					}
+				}
+				// take only 100 users first. for the rest wait for the next scheduled call
+				console.log("----------------------0 " + usersToBeAssigned.length);
+				usersToBeAssigned = usersToBeAssigned.slice(0, 100);
+				console.log("----------------------0 " + usersToBeAssigned.length);
+				var response = await assignMembersToGroup(groupToBeAssigned, usersToBeAssigned);
+			}				
+		} catch(error){
+			// do nothing, just go on
+		} finally {
+			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groupsToBeAssigned.length + " groups processed.");
+			/*
+			if(groupsToBeAssigned && groupsToBeAssigned.length > 0){
+				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " users found");				
+			} else {
+				schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no groups are provided");	
+			}
+			*/
+		}		
+	});
+});
+
 
 app.get("/pingShadowUserAccess", function (req, res) {
 	var jobID = req.get("x-sap-job-id");
