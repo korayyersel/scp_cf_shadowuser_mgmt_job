@@ -8,24 +8,20 @@ var passport = require("passport");
 var xssec = require("@sap/xssec");
 var xsenv = require("@sap/xsenv");
 var schedulerLib = require("./lib/schedulerLib");
-const { response } = require("express");
-const { read } = require("fs");
 
 var app = express();
-
+app.use(express.json());
 passport.use("JWT", new xssec.JWTStrategy(xsenv.getServices({
 	uaa: {
 		name: "shadowuser-mgmt-job-uaa"
 	}
 }).uaa));
-
 app.use(passport.initialize());
-
 app.use(
 	passport.authenticate("JWT", {
 		session: false
 	})
-);
+); 
 
 function messageJobStart(res, jobname) {
 	return new Promise(function (resolve, reject) {
@@ -524,20 +520,41 @@ app.get("/assignGroupMembers", function (req, res) {
 				assigmentInfo += usersToBeAssigned.length + " users added to " + groupToBeAssigned + ". ";
 			}				
 		} catch(error){
-			// do nothing, just go on
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error");
+			return;
 		} finally {
-			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groupsToBeAssigned.length + " groups processed. " + assigmentInfo);
-			/*
-			if(groupsToBeAssigned && groupsToBeAssigned.length > 0){
-				schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + users.length + " users found");				
-			} else {
-				schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no groups are provided");	
-			}
-			*/
+			schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended succesfully: " + groupsToBeAssigned.length + " groups processed. " + assigmentInfo);			
 		}		
 	});
 });
 
+app.post("/createUsers", function (req, res) {
+	console.dir("-------------------------------------------");
+	console.dir(req.body.users.length);
+	//var usersToBeCreated = req.query.users;
+
+	var jobID = req.get("x-sap-job-id");
+	var jobScheduleId = req.get("x-sap-job-schedule-id");
+	var jobRunId = req.get("x-sap-job-run-id");
+
+	var schedulerUpdateRequest = {
+		jobId: jobID,
+		scheduleId: jobScheduleId,
+		runId: jobRunId,
+		data: ""
+	};
+
+	var jobStartPromise = messageJobStart(res, "createUsers");
+	jobStartPromise.then(async function () {
+		/*
+		if(!(usersToBeCreated && usersToBeCreated.length > 0)){
+			schedulerLib.updateJob(schedulerUpdateRequest, false, "Async Job ended with error: no groups are provided");
+			return;	
+		}
+		schedulerLib.updateJob(schedulerUpdateRequest, true, "Async Job ended with success: " + usersToBeCreated.length + " users.");
+		*/
+	});
+});
 
 app.get("/pingShadowUserAccess", function (req, res) {
 	var jobID = req.get("x-sap-job-id");
