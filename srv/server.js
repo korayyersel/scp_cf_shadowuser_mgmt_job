@@ -578,8 +578,8 @@ app.get("/assignGroupMembers", function (req, res) {
 						usersToBeAssigned.push(user);
 					}
 				}
-				// take only 100 users first. for the rest wait for the next scheduled call
-				usersToBeAssigned = usersToBeAssigned.slice(0, 100);
+				// take only 500 users first. for the rest wait for the next scheduled call
+				usersToBeAssigned = usersToBeAssigned.slice(0, 500);
 				var response = await assignMembersToGroup(groupToBeAssigned, usersToBeAssigned);
 				assigmentInfo += usersToBeAssigned.length + " users added to " + groupToBeAssigned + ". ";
 			}				
