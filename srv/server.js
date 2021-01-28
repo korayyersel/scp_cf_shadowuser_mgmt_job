@@ -227,7 +227,7 @@ function clearGroup(id, ifmatch){
 		});
 				
 		var host = shadowUserAPIAccessConfiguration.configuration.apiurl.toString().replace("https://", "").replace("http://", "");
-		var path = "/Groups/" + id;	
+		var path = "/Groups/" + encodeURI(id);	
 		
 		var data = JSON.stringify({
 			"id": id,
@@ -487,11 +487,11 @@ app.get("/clearGroups", function (req, res) {
 		data: ""
 	};
 
-	var jobStartPromise = messageJobStart(res, "readGroups");
+	var jobStartPromise = messageJobStart(res, "clearGroups");
 	jobStartPromise.then(async function () {		
 		var groups = null;
 		var message = "";
-		try{
+		try{			
 			var responseAsJSON = await readGroups();
 			groups = responseAsJSON.resources;
 			
@@ -503,13 +503,11 @@ app.get("/clearGroups", function (req, res) {
 				}				
 			}
 			
-			for(var i = 0; i < groups.length; i++){
-				var group = groups[i];
+			for(var i = 0; i < groups.length; i++){				
+				var group = groups[i];				
 				var responseAsJSON = await clearGroup(group.id, group.meta.version);
 				message += (message === "") ? responseAsJSON.id : (", " + responseAsJSON.id);
-
-			}
-
+			}		
 		} catch(error){
 			// do nothing, just go on
 		} finally {
